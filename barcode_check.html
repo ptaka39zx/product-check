@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>製品番号照合（バーコード）</title>
+<style>
+  :root { --accent: #1D9E75; --ok: #0F6E56; --ng: #993C1D; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Hiragino Sans','Noto Sans JP',sans-serif; background: #000; color: #fff; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header { background: rgba(0,0,0,0.8); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; z-index: 10; }
+  .logo { width: 28px; height: 28px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  header h1 { font-size: 15px; font-weight: 600; }
+  .end-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
+
+  .cam-wrap { flex: 1; position: relative; overflow: hidden; background: #000; }
+
+  /* Quagga2が生成するvideoとcanvasを全画面に */
+  #interactive { width: 100%; height: 100%; position: relative; }
+  #interactive video  { position: absolute; inset: 0; width: 100% !important; height: 100% !important; object-fit: cover; }
+  #interactive canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: none; }
+
+  /* 暗幕＋スキャン枠 */
+  .dim { position: absolute; background: rgba(0,0,0,0.52); pointer-events: none; }
+  .dim.t { top:0; left:0; right:0; height:33%; }
+  .dim.b { bottom:0; left:0; right:0; height:46%; }
+  .dim.l { top:33%; left:0; width:4%; height:21%; }
+  .dim.r { top:33%; right:0; width:4%; height:21%; }
+
+  .scan-frame { position: absolute; top:33%; left:4%; width:92%; height:21%; border:2px solid var(--accent); border-radius:4px; pointer-events:none; }
+  .sc { position:absolute; width:16px; height:16px; border-color:#fff; border-style:solid; }
+  .sc.tl{top:-1px;left:-1px;border-width:3px 0 0 3px;}
+  .sc.tr{top:-1px;right:-1px;border-width:3px 3px 0 0;}
+  .sc.bl{bottom:-1px;left:-1px;border-width:0 0 3px 3px;}
+  .sc.br{bottom:-1px;right:-1px;border-width:0 3px 3px 0;}
+  .scan-line { position:absolute; left:0; right:0; height:2px; background:linear-gradient(to right,transparent,var(--accent),transparent); animation:sl 2s ease-in-out infinite; }
+  @keyframes sl{0%,100%{top:5%}50%{top:88%}}
+
+  /* ステップバー */
+  .step-bar { position:absolute; top:0; left:0; right:0; padding:10px 14px; display:flex; align-items:center; gap:8px; background:linear-gradient(to bottom,rgba(0,0,0,0.65),transparent); pointer-events:none; z-index:5; }
+  .sdot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; transition:background 0.3s; flex-shrink:0; }
+  .sdot.active{background:var(--accent);color:#fff;}
+  .sdot.done{background:rgba(255,255,255,0.3);color:#fff;}
+  .sdot.wait{background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.35);}
+  .sline{flex:1;height:2px;background:rgba(255,255,255,0.2);border-radius:1px;}
+  .sline.done{background:rgba(255,255,255,0.5);}
+  .slabel{font-size:13px;color:#fff;font-weight:500;}
+
+  /* ガイド・チップ */
+  .guide-area { position:absolute; top:56%; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; z-index:5; }
+  .guide-chip { background:rgba(0,0,0,0.65); color:#fff; font-size:12px; padding:4px 14px; border-radius:12px; }
+  .scanned-chip { background:rgba(29,158,117,0.9); color:#fff; font-size:13px; font-family:monospace; padding:4px 14px; border-radius:10px; display:none; max-width:88%; text-align:center; word-break:break-all; }
+  .wait-chip { background:rgba(0,0,0,0.65); color:rgba(255,255,255,0.7); font-size:12px; padding:4px 14px; border-radius:12px; display:none; }
+
+  /* 手入力 */
+  .bottom-area { position:absolute; bottom:0; left:0; right:0; padding:10px 16px 28px; background:linear-gradient(to top,rgba(0,0,0,0.75),transparent); display:flex; flex-direction:column; align-items:center; gap:8px; z-index:5; }
+  .mode-toggle { display:flex; gap:6px; }
+  .mbtn { padding:5px 14px; border-radius:16px; border:1px solid rgba(255,255,255,0.25); background:transparent; color:rgba(255,255,255,0.6); font-size:12px; cursor:pointer; font-family:inherit; }
+  .mbtn.active { background:rgba(255,255,255,0.15); color:#fff; border-color:rgba(255,255,255,0.4); }
+  .manual-row { display:none; width:100%; max-width:320px; gap:8px; align-items:center; }
+  .manual-row.show { display:flex; }
+  .manual-input { flex:1; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.1); color:#fff; font-size:15px; font-family:monospace; letter-spacing:0.05em; text-transform:uppercase; }
+  .manual-input::placeholder{color:rgba(255,255,255,0.25);}
+  .manual-input:focus{outline:2px solid var(--accent);border-color:transparent;}
+  .manual-submit { padding:10px 14px; border-radius:8px; background:var(--accent); color:#fff; border:none; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+
+  /* フラッシュ */
+  .flash{position:absolute;inset:0;background:rgba(255,255,255,0.4);opacity:0;pointer-events:none;transition:opacity 0.08s;z-index:6;}
+  .flash.on{opacity:1;}
+
+  /* 結果パネル */
+  .result-panel{position:absolute;inset:0;background:rgba(0,0,0,0.9);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;z-index:10;}
+  .result-panel.show{display:flex;}
+  .result-icon{font-size:72px;line-height:1;}
+  .result-title{font-size:22px;font-weight:700;text-align:center;}
+  .result-title.ok{color:#4AE8A0;}
+  .result-title.ng{color:#FF6B4A;}
+  .result-nums{width:100%;max-width:320px;display:flex;flex-direction:column;gap:6px;}
+  .rrow{background:rgba(255,255,255,0.1);border-radius:8px;padding:10px 14px;}
+  .rlabel{font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:3px;}
+  .rval{font-size:16px;font-family:monospace;font-weight:600;color:#fff;letter-spacing:0.05em;}
+  .rval.ng{color:#FF6B4A;}
+  .next-btn{margin-top:8px;padding:14px 40px;border-radius:30px;background:var(--accent);color:#fff;border:none;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .cdown{font-size:12px;color:rgba(255,255,255,0.4);}
+
+  /* スタート画面 */
+  .start-screen{position:absolute;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px;z-index:20;}
+  .start-logo{width:80px;height:80px;background:var(--accent);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:40px;}
+  .start-title{font-size:22px;font-weight:700;}
+  .start-sub{font-size:13px;color:rgba(255,255,255,0.5);text-align:center;line-height:2;}
+  .start-btn{padding:16px 48px;border-radius:30px;background:var(--accent);color:#fff;border:none;font-size:17px;font-weight:600;cursor:pointer;font-family:inherit;}
+
+  .loading{position:absolute;inset:0;background:#111;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:15;}
+  .loading.show{display:flex;}
+  .spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="start-screen" id="startScreen">
+  <div class="start-logo">📊</div>
+  <div class="start-title">バーコード照合</div>
+  <div class="start-sub">Code39バーコードをスキャンして<br>1枚目・2枚目の製品番号を自動照合します</div>
+  <button class="start-btn" onclick="startApp()">📷 カメラを起動して開始</button>
+</div>
+
+<div class="loading" id="loadingScreen">
+  <div class="spinner"></div>
+  <div style="color:rgba(255,255,255,0.6);font-size:14px;">カメラを起動中...</div>
+</div>
+
+<header id="mainHeader" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;">
+    <div class="logo">📊</div>
+    <h1>バーコード照合（Code39）</h1>
+  </div>
+  <button class="end-btn" onclick="endApp()">終了</button>
+</header>
+
+<div class="cam-wrap" id="camWrap" style="display:none">
+  <!-- Quagga2がここにvideoを挿入する -->
+  <div id="interactive"></div>
+
+  <!-- 暗幕 -->
+  <div class="dim t"></div>
+  <div class="dim b"></div>
+  <div class="dim l"></div>
+  <div class="dim r"></div>
+
+  <!-- スキャン枠 -->
+  <div class="scan-frame">
+    <div class="sc tl"></div><div class="sc tr"></div>
+    <div class="sc bl"></div><div class="sc br"></div>
+    <div class="scan-line"></div>
+  </div>
+
+  <!-- ステップバー -->
+  <div class="step-bar">
+    <div class="sdot active" id="dot1">1</div>
+    <div class="sline" id="line1"></div>
+    <div class="sdot wait" id="dot2">2</div>
+    <div style="flex:1"></div>
+    <div class="slabel" id="stepLabel">現品票をスキャン</div>
+  </div>
+
+  <!-- ガイド -->
+  <div class="guide-area">
+    <div class="guide-chip" id="guideChip">バーコードを横向きに枠内へ</div>
+    <div class="scanned-chip" id="scannedChip"></div>
+    <div class="wait-chip" id="waitChip">⏳ 2枚目をスキャンしてください...</div>
+  </div>
+
+  <!-- 手入力 -->
+  <div class="bottom-area">
+    <div class="mode-toggle">
+      <button class="mbtn active" id="modeScan" onclick="setMode('scan')">📊 スキャン</button>
+      <button class="mbtn" id="modeManual" onclick="setMode('manual')">✏️ 手入力</button>
+    </div>
+    <div class="manual-row" id="manualRow">
+      <input class="manual-input" type="text" id="manualInput" placeholder="23306M81501BC"
+        autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="manual-submit" onclick="submitManual()">確定</button>
+    </div>
+  </div>
+
+  <div class="flash" id="flash"></div>
+
+  <!-- 結果パネル -->
+  <div class="result-panel" id="resultPanel">
+    <div class="result-icon" id="resultIcon"></div>
+    <div class="result-title" id="resultTitle"></div>
+    <div class="result-nums" id="resultNums"></div>
+    <button class="next-btn" onclick="nextRound()">次の照合へ →</button>
+    <div class="cdown" id="cdown"></div>
+  </div>
+</div>
+
+<!-- Quagga2: Code39実績豊富な安定ライブラリ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<script>
+let step = 1;
+let nums = [null, null];
+let accepting = true;
+let countdownTimer = null;
+let inputMode = 'scan';
+let lastScan = 0;
+let quaggaRunning = false;
+
+// ---- 音声 ----
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function beep(freq, dur, type, vol) {
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+
+function soundScan() { beep(1200, 0.12, 'sine', 0.5); }
+function soundOk() {
+  beep(1200, 0.12, 'sine', 0.5);
+  setTimeout(function(){ beep(1600, 0.15, 'sine', 0.5); }, 160);
+}
+function soundNg() {
+  beep(220, 0.6, 'sawtooth', 0.4);
+  setTimeout(function(){ beep(180, 0.5, 'sawtooth', 0.35); }, 250);
+}
+
+// ---- 起動 ----
+function startApp() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('loadingScreen').classList.add('show');
+
+  Quagga.init({
+    inputStream: {
+      name: 'Live',
+      type: 'LiveStream',
+      target: document.getElementById('interactive'),
+      constraints: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      area: {
+        top: '30%', right: '4%', left: '4%', bottom: '46%'
+      }
+    },
+    decoder: {
+      readers: ['code_39_reader'],
+      multiple: false
+    },
+    locate: true,
+    frequency: 15
+  }, function(err) {
+    document.getElementById('loadingScreen').classList.remove('show');
+    if (err) {
+      document.getElementById('startScreen').style.display = 'flex';
+      alert('カメラを起動できませんでした。\n\n' + err + '\n\nHTTPS環境でお試しください。');
+      return;
+    }
+    Quagga.start();
+    quaggaRunning = true;
+    document.getElementById('mainHeader').style.display = 'flex';
+    document.getElementById('camWrap').style.display = 'block';
+    setStep(1);
+  });
+
+  Quagga.onDetected(function(result) {
+    if (!accepting) return;
+    const code = result.codeResult && result.codeResult.code;
+    if (!code) return;
+    const now = Date.now();
+    if (now - lastScan < 1200) return;
+    lastScan = now;
+    onScanned(code.trim());
+  });
+}
+
+function endApp() {
+  if (quaggaRunning) { Quagga.stop(); quaggaRunning = false; }
+  if (countdownTimer) clearInterval(countdownTimer);
+  document.getElementById('startScreen').style.display = 'flex';
+  document.getElementById('mainHeader').style.display = 'none';
+  document.getElementById('camWrap').style.display = 'none';
+  document.getElementById('resultPanel').classList.remove('show');
+  step = 1; nums = [null, null]; accepting = true;
+}
+
+// ---- スキャン成功 ----
+function onScanned(text) {
+  if (!accepting) return;
+  accepting = false;
+
+  // フラッシュ
+  const fl = document.getElementById('flash');
+  fl.classList.add('on');
+  setTimeout(function(){ fl.classList.remove('on'); }, 120);
+
+  // ピッ音
+  soundScan();
+
+  const chip = document.getElementById('scannedChip');
+  chip.textContent = '✓ ' + text;
+  chip.style.display = 'block';
+  nums[step - 1] = text;
+
+  if (step === 1) {
+    // 1枚目：チップ表示 → 1秒ウェイト → 2枚目へ
+    setTimeout(function(){
+      chip.style.display = 'none';
+      document.getElementById('waitChip').style.display = 'block';
+      setTimeout(function(){
+        document.getElementById('waitChip').style.display = 'none';
+        accepting = true;
+        setStep(2);
+      }, 1000);
+    }, 400);
+  } else {
+    // 2枚目：0.5秒後に結果
+    setTimeout(function(){
+      chip.style.display = 'none';
+      showResult();
+    }, 500);
+  }
+}
+
+// ---- 手入力 ----
+function setMode(mode) {
+  inputMode = mode;
+  document.getElementById('modeScan').classList.toggle('active', mode === 'scan');
+  document.getElementById('modeManual').classList.toggle('active', mode === 'manual');
+  document.getElementById('manualRow').classList.toggle('show', mode === 'manual');
+  document.getElementById('manualInput').value = '';
+  updateGuide();
+}
+
+function submitManual() {
+  const val = document.getElementById('manualInput').value.trim().toUpperCase().replace(/[^A-Z0-9\-\.\ \$\/\+\%]/g, '');
+  if (!val) { alert('製品番号を入力してください'); return; }
+  onScanned(val);
+}
+
+function updateGuide() {
+  const c = document.getElementById('guideChip');
+  if (inputMode === 'manual') {
+    c.textContent = step === 1 ? '現品票の製品番号を入力' : '出荷票の製品番号を入力';
+  } else {
+    c.textContent = step === 1 ? '現品票のバーコードを枠内へ（横向き）' : '出荷票のバーコードを枠内へ（横向き）';
+  }
+}
+
+// ---- ステップ ----
+function setStep(s) {
+  step = s;
+  const d1 = document.getElementById('dot1'), d2 = document.getElementById('dot2');
+  const l1 = document.getElementById('line1');
+  if (s === 1) {
+    d1.className = 'sdot active'; d1.textContent = '1';
+    d2.className = 'sdot wait';   d2.textContent = '2';
+    l1.className = 'sline';
+    document.getElementById('stepLabel').textContent = '現品票をスキャン';
+  } else {
+    d1.className = 'sdot done'; d1.textContent = '✓';
+    d2.className = 'sdot active'; d2.textContent = '2';
+    l1.className = 'sline done';
+    document.getElementById('stepLabel').textContent = '出荷票をスキャン';
+  }
+  document.getElementById('manualInput').value = '';
+  updateGuide();
+}
+
+// ---- 結果 ----
+function showResult() {
+  const n0 = nums[0], n1 = nums[1];
+  const ok = n0 && n1 && n0 === n1;
+  if (ok) { soundOk(); } else { soundNg(); }
+
+  document.getElementById('resultIcon').textContent = ok ? '✅' : '❌';
+  const t = document.getElementById('resultTitle');
+  t.textContent = ok ? '一致　製品番号が一致しました' : '不一致　製品番号が異なります';
+  t.className = 'result-title ' + (ok ? 'ok' : 'ng');
+
+  document.getElementById('resultNums').innerHTML =
+    '<div class="rrow"><div class="rlabel">現品票</div><div class="rval">' + (n0||'読取失敗') + '</div></div>' +
+    '<div class="rrow"><div class="rlabel">出荷票</div><div class="rval ' + (!ok?'ng':'') + '">' + (n1||'読取失敗') + '</div></div>';
+
+  document.getElementById('resultPanel').classList.add('show');
+
+  let sec = 5;
+  document.getElementById('cdown').textContent = sec + '秒後に自動で次の照合へ';
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(function() {
+    sec--;
+    if (sec <= 0) { clearInterval(countdownTimer); nextRound(); }
+    else document.getElementById('cdown').textContent = sec + '秒後に自動で次の照合へ';
+  }, 1000);
+}
+
+function nextRound() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  document.getElementById('resultPanel').classList.remove('show');
+  nums = [null, null]; accepting = true;
+  setStep(1);
+}
+</script>
+</body>
+</html>
