@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>製品番号照合（バーコード）</title>
+<style>
+  :root {
+    --ok: #0F6E56; --ok-bg: #E1F5EE;
+    --ng: #993C1D; --ng-bg: #FAECE7;
+    --accent: #1D9E75; --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Hiragino Sans','Noto Sans JP',sans-serif; background: #000; color: #fff; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header { background: rgba(0,0,0,0.85); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .logo { width: 28px; height: 28px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  header h1 { font-size: 15px; font-weight: 600; color: #fff; }
+  .end-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3); background: transparent; color: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
+
+  .cam-wrap { flex: 1; position: relative; overflow: hidden; }
+
+  /* html5-qrcodeが生成するvideoを全画面に */
+  #reader { width: 100%; height: 100%; }
+  #reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+  #reader img { display: none !important; }
+  /* デフォルトUIを非表示 */
+  #reader__scan_region { background: transparent !important; }
+  #reader__dashboard { display: none !important; }
+  #reader__camera_selection { display: none !important; }
+
+  /* カスタムオーバーレイ */
+  .overlay { position: absolute; inset: 0; pointer-events: none; }
+
+  /* スキャン枠 */
+  .scan-box {
+    position: absolute; left: 4%; width: 92%; top: 35%; height: 18%;
+    border: 2.5px solid var(--accent); border-radius: 6px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+  }
+  .scan-line { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(to right, transparent, var(--accent), transparent); animation: scanline 2s ease-in-out infinite; }
+  @keyframes scanline { 0%,100%{top:5%} 50%{top:88%} }
+  .sc { position: absolute; width: 18px; height: 18px; border-color: #fff; border-style: solid; }
+  .sc.tl { top:-1px; left:-1px; border-width: 3px 0 0 3px; }
+  .sc.tr { top:-1px; right:-1px; border-width: 3px 3px 0 0; }
+  .sc.bl { bottom:-1px; left:-1px; border-width: 0 0 3px 3px; }
+  .sc.br { bottom:-1px; right:-1px; border-width: 0 3px 3px 0; }
+
+  /* ステップバー */
+  .step-bar { position: absolute; top: 0; left: 0; right: 0; padding: 10px 14px; display: flex; align-items: center; gap: 8px; background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent); pointer-events: none; }
+  .sdot { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; transition: background 0.3s; }
+  .sdot.active { background: var(--accent); color: #fff; }
+  .sdot.done { background: rgba(255,255,255,0.3); color: #fff; }
+  .sdot.wait { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.35); }
+  .sline { flex: 1; height: 2px; background: rgba(255,255,255,0.2); border-radius: 1px; transition: background 0.3s; }
+  .sline.done { background: rgba(255,255,255,0.5); }
+  .slabel { font-size: 13px; color: #fff; font-weight: 500; }
+
+  /* ガイド */
+  .guide-wrap { position: absolute; top: 56%; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+  .guide-chip { background: rgba(0,0,0,0.6); color: #fff; font-size: 13px; padding: 5px 16px; border-radius: 14px; text-align: center; }
+  .scanned-chip { background: rgba(29,158,117,0.9); color: #fff; font-size: 13px; font-family: monospace; padding: 5px 14px; border-radius: 10px; display: none; max-width: 88%; text-align: center; word-break: break-all; }
+
+  /* 手入力エリア */
+  .bottom-area { position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 16px 28px; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .mode-toggle { display: flex; gap: 6px; }
+  .mbtn { padding: 5px 14px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: rgba(255,255,255,0.6); font-size: 12px; cursor: pointer; font-family: inherit; }
+  .mbtn.active { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.4); }
+  .manual-row { display: none; width: 100%; max-width: 320px; gap: 8px; align-items: center; }
+  .manual-row.show { display: flex; }
+  .manual-input { flex: 1; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: #fff; font-size: 15px; font-family: monospace; letter-spacing: 0.05em; text-transform: uppercase; }
+  .manual-input::placeholder { color: rgba(255,255,255,0.25); }
+  .manual-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .manual-submit { padding: 10px 14px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; border: none; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+
+  /* フラッシュ */
+  .flash { position: absolute; inset: 0; background: rgba(255,255,255,0.35); opacity: 0; pointer-events: none; transition: opacity 0.1s; }
+  .flash.on { opacity: 1; }
+
+  /* 結果パネル */
+  .result-panel { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; }
+  .result-panel.show { display: flex; }
+  .result-icon { font-size: 72px; line-height: 1; }
+  .result-title { font-size: 22px; font-weight: 700; text-align: center; }
+  .result-title.ok { color: #4AE8A0; }
+  .result-title.ng { color: #FF6B4A; }
+  .result-nums { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 6px; }
+  .rrow { background: rgba(255,255,255,0.1); border-radius: var(--radius-sm); padding: 10px 14px; }
+  .rlabel { font-size: 10px; color: rgba(255,255,255,0.45); margin-bottom: 3px; }
+  .rval { font-size: 16px; font-family: monospace; font-weight: 600; color: #fff; letter-spacing: 0.05em; }
+  .rval.ng { color: #FF6B4A; }
+  .next-btn { margin-top: 8px; padding: 14px 40px; border-radius: 30px; background: var(--accent); color: #fff; border: none; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .countdown { font-size: 12px; color: rgba(255,255,255,0.4); }
+
+  /* スタート画面 */
+  .start-screen { position: absolute; inset: 0; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 32px; z-index: 20; }
+  .start-logo { width: 80px; height: 80px; background: var(--accent); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+  .start-title { font-size: 22px; font-weight: 700; }
+  .start-sub { font-size: 13px; color: rgba(255,255,255,0.5); text-align: center; line-height: 2; }
+  .start-btn { padding: 16px 48px; border-radius: 30px; background: var(--accent); color: #fff; border: none; font-size: 17px; font-weight: 600; cursor: pointer; font-family: inherit; }
+
+  /* ローディング */
+  .loading-screen { position: absolute; inset: 0; background: #111; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 15; }
+  .loading-screen.show { display: flex; }
+  .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 14px; color: rgba(255,255,255,0.6); }
+</style>
+</head>
+<body>
+
+<!-- スタート画面 -->
+<div class="start-screen" id="startScreen">
+  <div class="start-logo">📊</div>
+  <div class="start-title">バーコード照合</div>
+  <div class="start-sub">
+    バーコードをスキャンして<br>
+    1枚目・2枚目の製品番号を自動照合します<br><br>
+    <span style="font-size:11px;color:rgba(255,255,255,0.3)">Code128 / QR / DataMatrix 対応</span>
+  </div>
+  <button class="start-btn" onclick="startApp()">📷 カメラを起動して開始</button>
+</div>
+
+<!-- ローディング -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="spinner"></div>
+  <div class="loading-text">カメラを起動中...</div>
+</div>
+
+<!-- ヘッダー -->
+<header id="mainHeader" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;">
+    <div class="logo">📊</div>
+    <h1>バーコード照合</h1>
+  </div>
+  <button class="end-btn" onclick="endApp()">終了</button>
+</header>
+
+<!-- カメラ＋UI -->
+<div class="cam-wrap" id="camWrap" style="display:none">
+  <div id="reader"></div>
+
+  <div class="overlay">
+    <!-- スキャン枠 -->
+    <div class="scan-box" id="scanBox">
+      <div class="sc tl"></div><div class="sc tr"></div>
+      <div class="sc bl"></div><div class="sc br"></div>
+      <div class="scan-line"></div>
+    </div>
+
+    <!-- ステップバー -->
+    <div class="step-bar">
+      <div class="sdot active" id="dot1">1</div>
+      <div class="sline" id="line1"></div>
+      <div class="sdot wait" id="dot2">2</div>
+      <div style="flex:1"></div>
+      <div class="slabel" id="stepLabel">現品票をスキャン</div>
+    </div>
+
+    <!-- ガイド -->
+    <div class="guide-wrap">
+      <div class="guide-chip" id="guideChip">バーコードを横向きに枠内へ</div>
+      <div class="scanned-chip" id="scannedChip"></div>
+    </div>
+
+    <!-- 手入力 -->
+    <div class="bottom-area">
+      <div class="mode-toggle">
+        <button class="mbtn active" id="modeScan" onclick="setMode('scan')">📊 スキャン</button>
+        <button class="mbtn" id="modeManual" onclick="setMode('manual')">✏️ 手入力</button>
+      </div>
+      <div class="manual-row" id="manualRow">
+        <input class="manual-input" type="text" id="manualInput"
+          placeholder="23306M81501BC" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button class="manual-submit" onclick="submitManual()">確定</button>
+      </div>
+    </div>
+
+    <!-- フラッシュ -->
+    <div class="flash" id="flash"></div>
+
+    <!-- 結果パネル -->
+    <div class="result-panel" id="resultPanel">
+      <div class="result-icon" id="resultIcon"></div>
+      <div class="result-title" id="resultTitle"></div>
+      <div class="result-nums" id="resultNums"></div>
+      <button class="next-btn" onclick="nextRound()">次の照合へ →</button>
+      <div class="countdown" id="countdown"></div>
+    </div>
+  </div>
+</div>
+
+<!-- html5-qrcode（安定した実績あり） -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script>
+let scanner = null;
+let step = 1;
+let nums = [null, null];
+let accepting = true;
+let countdownTimer = null;
+let inputMode = 'scan';
+let lastScan = 0;
+
+// ---- 起動 ----
+async function startApp() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('loadingScreen').classList.add('show');
+
+  try {
+    // カメラ一覧取得（背面カメラを優先）
+    const devices = await Html5Qrcode.getCameras();
+    if (!devices || devices.length === 0) throw new Error('カメラが見つかりません');
+
+    // 背面カメラを選択（"back" or "environment" を含むものを優先）
+    const backCam = devices.find(d =>
+      /back|rear|environment/i.test(d.label)
+    ) || devices[devices.length - 1];
+
+    scanner = new Html5Qrcode('reader');
+    await scanner.start(
+      backCam.id,
+      {
+        fps: 24,
+        qrbox: (w, h) => ({
+          width: Math.floor(w * 0.92),
+          height: Math.floor(h * 0.15)
+        }),
+        aspectRatio: 1.7,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_39,
+        ]
+      },
+      (text) => {
+        const now = Date.now();
+        if (!accepting || now - lastScan < 1500) return;
+        lastScan = now;
+        onScanned(text.trim());
+      },
+      () => {} // エラー（未検出）は無視
+    );
+
+    document.getElementById('loadingScreen').classList.remove('show');
+    document.getElementById('mainHeader').style.display = 'flex';
+    document.getElementById('camWrap').style.display = 'block';
+    setStep(1);
+
+  } catch(e) {
+    document.getElementById('loadingScreen').classList.remove('show');
+    document.getElementById('startScreen').style.display = 'flex';
+    alert('カメラを起動できませんでした。\n\n' + e.message + '\n\nHTTPS環境（GitHub Pages等）でお試しください。');
+  }
+}
+
+function endApp() {
+  if (scanner) { scanner.stop().catch(()=>{}); scanner = null; }
+  if (countdownTimer) clearInterval(countdownTimer);
+  document.getElementById('startScreen').style.display = 'flex';
+  document.getElementById('mainHeader').style.display = 'none';
+  document.getElementById('camWrap').style.display = 'none';
+  document.getElementById('resultPanel').classList.remove('show');
+  step = 1; nums = [null, null]; accepting = true;
+}
+
+// ---- スキャン結果 ----
+function onScanned(text) {
+  if (!accepting) return;
+  accepting = false;
+
+  // フラッシュ
+  const fl = document.getElementById('flash');
+  fl.classList.add('on');
+  setTimeout(() => fl.classList.remove('on'), 150);
+
+  // スキャン完了チップ表示
+  const chip = document.getElementById('scannedChip');
+  chip.textContent = '✓ ' + text;
+  chip.style.display = 'block';
+
+  nums[step - 1] = text;
+
+  if (step === 1) {
+    setTimeout(() => {
+      chip.style.display = 'none';
+      accepting = true;
+      setStep(2);
+    }, 700);
+  } else {
+    setTimeout(() => {
+      chip.style.display = 'none';
+      showResult();
+    }, 700);
+  }
+}
+
+// ---- 手入力 ----
+function setMode(mode) {
+  inputMode = mode;
+  document.getElementById('modeScan').classList.toggle('active', mode === 'scan');
+  document.getElementById('modeManual').classList.toggle('active', mode === 'manual');
+  document.getElementById('manualRow').classList.toggle('show', mode === 'manual');
+  document.getElementById('manualInput').value = '';
+  updateGuide();
+}
+
+function submitManual() {
+  const val = document.getElementById('manualInput').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!val) { alert('製品番号を入力してください'); return; }
+  onScanned(val);
+}
+
+function updateGuide() {
+  const chip = document.getElementById('guideChip');
+  if (inputMode === 'manual') {
+    chip.textContent = step === 1 ? '現品票の製品番号を入力してください' : '出荷票の製品番号を入力してください';
+  } else {
+    chip.textContent = step === 1 ? '現品票のバーコードを横向きに枠内へ' : '出荷票のバーコードを枠内に合わせてください（横向き）';
+  }
+}
+
+// ---- ステップ ----
+function setStep(s) {
+  step = s;
+  const dot1 = document.getElementById('dot1');
+  const dot2 = document.getElementById('dot2');
+  const line1 = document.getElementById('line1');
+  const label = document.getElementById('stepLabel');
+  if (s === 1) {
+    dot1.className = 'sdot active'; dot1.textContent = '1';
+    dot2.className = 'sdot wait'; dot2.textContent = '2';
+    line1.className = 'sline';
+    label.textContent = '現品票をスキャン';
+  } else {
+    dot1.className = 'sdot done'; dot1.textContent = '✓';
+    dot2.className = 'sdot active'; dot2.textContent = '2';
+    line1.className = 'sline done';
+    label.textContent = '出荷票をスキャン';
+  }
+  document.getElementById('manualInput').value = '';
+  updateGuide();
+}
+
+// ---- 結果表示 ----
+function showResult() {
+  const n0 = nums[0], n1 = nums[1];
+  const ok = n0 && n1 && n0 === n1;
+
+  document.getElementById('resultIcon').textContent = ok ? '✅' : '❌';
+  const title = document.getElementById('resultTitle');
+  title.textContent = ok ? '一致　製品番号が一致しました' : '不一致　製品番号が異なります';
+  title.className = `result-title ${ok ? 'ok' : 'ng'}`;
+
+  document.getElementById('resultNums').innerHTML = `
+    <div class="rrow"><div class="rlabel">現品票</div><div class="rval">${n0 || '読取失敗'}</div></div>
+    <div class="rrow"><div class="rlabel">出荷票</div><div class="rval ${!ok ? 'ng' : ''}">${n1 || '読取失敗'}</div></div>`;
+
+  document.getElementById('resultPanel').classList.add('show');
+
+  let sec = 5;
+  document.getElementById('countdown').textContent = `${sec}秒後に自動で次の照合へ`;
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    sec--;
+    if (sec <= 0) { clearInterval(countdownTimer); nextRound(); }
+    else document.getElementById('countdown').textContent = `${sec}秒後に自動で次の照合へ`;
+  }, 1000);
+}
+
+function nextRound() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  document.getElementById('resultPanel').classList.remove('show');
+  nums = [null, null];
+  accepting = true;
+  setStep(1);
+}
+</script>
+</body>
+</html>
