@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>製品番号照合</title>
+<style>
+  :root {
+    --bg: #F5F4F0; --surface: #FFF; --border: #E0DED8;
+    --text: #1A1A18; --text-sub: #6B6A65; --text-hint: #A09F9A;
+    --ok: #0F6E56; --ok-bg: #E1F5EE; --ng: #993C1D; --ng-bg: #FAECE7;
+    --accent: #1D9E75; --accent-light: #9FE1CB; --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 2rem; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 10; }
+  header .logo { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header p { font-size: 11px; color: var(--text-sub); }
+  .main { padding: 12px; max-width: 600px; margin: 0 auto; }
+  .result-banner { border-radius: var(--radius); padding: 20px 16px; text-align: center; margin-bottom: 12px; border: 1.5px solid var(--border); background: var(--surface); transition: background 0.3s; }
+  .result-banner.ok { background: var(--ok-bg); border-color: var(--accent-light); }
+  .result-banner.ng { background: var(--ng-bg); border-color: #F5C4B3; }
+  .result-icon { font-size: 44px; line-height: 1; margin-bottom: 6px; }
+  .result-status { font-size: 18px; font-weight: 700; }
+  .result-status.ok { color: var(--ok); } .result-status.ng { color: var(--ng); } .result-status.wait { color: var(--text-sub); }
+  .result-detail { font-size: 12px; color: var(--text-sub); margin-top: 4px; font-family: monospace; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+  .card-header { font-size: 13px; font-weight: 600; color: var(--text-sub); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .badge { font-size: 10px; background: var(--bg); color: var(--text-sub); border-radius: 4px; padding: 1px 6px; border: 1px solid var(--border); font-weight: 500; }
+  .tabs { display: flex; background: var(--bg); border-radius: var(--radius-sm); padding: 3px; gap: 2px; margin-bottom: 10px; }
+  .tab { flex: 1; padding: 7px 4px; font-size: 12px; font-weight: 500; border: none; border-radius: 6px; background: transparent; color: var(--text-sub); cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .cam-area { border-radius: var(--radius-sm); overflow: hidden; background: #000; aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center; position: relative; }
+  .cam-area video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #666; }
+  .cam-placeholder .cam-icon { font-size: 36px; }
+  .cam-placeholder p { font-size: 12px; }
+
+  /* トリミングオーバーレイ */
+  .trim-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .trim-overlay .dim { position: absolute; background: rgba(0,0,0,0.5); }
+  .trim-overlay .dim.top    { top:0; left:0; right:0; }
+  .trim-overlay .dim.bottom { bottom:0; left:0; right:0; }
+  .trim-overlay .dim.left   { left:0; }
+  .trim-overlay .dim.right  { right:0; }
+  .trim-frame {
+    position: absolute; left: 5%; width: 90%;
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+    border-radius: 4px;
+  }
+  .trim-handle {
+    position: absolute; width: 100%;
+    height: 6px; background: var(--accent);
+    opacity: 0.8; cursor: ns-resize;
+    border-radius: 3px;
+    pointer-events: all;
+    touch-action: none;
+  }
+  .trim-handle.top-handle { top: -3px; }
+  .trim-handle.bot-handle { bottom: -3px; }
+  .trim-label {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: white;
+    font-size: 10px; padding: 1px 8px; border-radius: 10px;
+    white-space: nowrap; pointer-events: none;
+  }
+  .trim-label.top-label { top: -18px; }
+  .trim-label.bot-label { bottom: -18px; }
+
+  .btn { width: 100%; padding: 11px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 8px; font-family: inherit; transition: background 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn:active { background: var(--bg); }
+  .btn.primary { background: var(--accent); color: white; border-color: transparent; }
+  .btn.primary:active { background: var(--ok); }
+  .btn.danger { border-color: #F5C4B3; color: var(--ng); }
+  .upload-area { border: 1.5px dashed var(--border); border-radius: var(--radius-sm); aspect-ratio: 4/3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; position: relative; background: var(--bg); overflow: hidden; }
+  .upload-area input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-icon { font-size: 32px; }
+  .upload-label { font-size: 12px; color: var(--text-sub); }
+
+  /* トリミングエディタ（ファイル用） */
+  .trim-editor-wrap { position: relative; display: none; margin-bottom: 8px; }
+  .trim-editor-wrap canvas { width: 100%; border-radius: var(--radius-sm); display: block; }
+  .trim-editor-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .trim-editor-frame {
+    position: absolute; left: 4%; width: 92%;
+    border: 2px solid var(--accent);
+    background: transparent;
+    pointer-events: none;
+  }
+  .trim-slider-wrap { margin-top: 8px; }
+  .trim-slider-label { font-size: 11px; color: var(--text-sub); margin-bottom: 2px; }
+  .trim-slider-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .trim-slider-row input[type=range] { flex: 1; }
+  .trim-slider-row span { font-size: 11px; color: var(--text-hint); min-width: 28px; }
+
+  .manual-input { width: 100%; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 16px; font-family: monospace; color: var(--text); background: var(--bg); letter-spacing: 0.05em; text-transform: uppercase; }
+  .manual-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .extracted { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+  .extracted-label { font-size: 10px; color: var(--text-hint); margin-bottom: 3px; letter-spacing: 0.05em; }
+  .extracted-num { font-size: 17px; font-family: monospace; font-weight: 600; letter-spacing: 0.06em; color: var(--text); min-height: 24px; }
+  .extracted-num.pending { color: var(--text-hint); font-size: 13px; font-weight: 400; font-family: inherit; }
+  .loading-bar { height: 3px; background: var(--bg); border-radius: 2px; overflow: hidden; margin-top: 8px; display: none; }
+  .loading-bar.active { display: block; }
+  .loading-bar-inner { height: 100%; background: var(--accent); border-radius: 2px; animation: loadpulse 1.2s ease-in-out infinite; }
+  @keyframes loadpulse { 0%,100%{width:10%;margin-left:0} 50%{width:60%;margin-left:20%} }
+  .log-area { font-size: 11px; font-family: monospace; background: var(--bg); border-radius: var(--radius-sm); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--text-sub); max-height: 80px; overflow-y: auto; margin-top: 8px; border: 1px solid var(--border); display: none; }
+  canvas.hidden { display: none; }
+  .hint { font-size: 11px; color: var(--text-hint); margin-top: 6px; line-height: 1.6; }
+  .section-title { font-size: 12px; font-weight: 600; color: var(--text-sub); margin: 14px 0 6px; }
+
+  /* プレビューサムネイル */
+  .thumb-wrap { position: relative; margin-bottom: 8px; }
+  .thumb-wrap img { width: 100%; border-radius: var(--radius-sm); display: block; }
+  .thumb-crop-indicator {
+    position: absolute; left: 4%; width: 92%;
+    border: 2px solid var(--accent);
+    background: rgba(29,158,117,0.08);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🔍</div>
+  <div>
+    <h1>製品番号照合</h1>
+    <p>現品票 / 出荷票の製品番号を自動照合</p>
+  </div>
+</header>
+
+<div class="main">
+  <div class="result-banner" id="banner">
+    <div class="result-icon" id="bannerIcon">📋</div>
+    <div class="result-status wait" id="bannerStatus">2枚の伝票を読み取ってください</div>
+    <div class="result-detail" id="bannerDetail">現品票・出荷票の製品番号を照合します</div>
+  </div>
+
+  <!-- 現品票 -->
+  <div class="card">
+    <div class="card-header">📄 現品票 <span class="badge">伝票①</span></div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(0,'camera')">📷 カメラ</button>
+      <button class="tab" onclick="switchTab(0,'file')">🖼 ファイル</button>
+      <button class="tab" onclick="switchTab(0,'manual')">✏️ 手入力</button>
+    </div>
+    <div id="t0-camera">
+      <div class="cam-area" id="camArea0">
+        <div class="cam-placeholder" id="camPh0"><div class="cam-icon">📷</div><p>カメラを起動してください</p></div>
+        <video id="vid0" autoplay playsinline muted style="display:none"></video>
+        <!-- トリミングフレーム（カメラ用） -->
+        <div class="trim-frame" id="trimFrame0" style="display:none; top:35%; height:20%;">
+          <div class="trim-handle top-handle" id="topHandle0"></div>
+          <div class="trim-handle bot-handle" id="botHandle0"></div>
+          <div class="trim-label top-label">上端をドラッグ</div>
+          <div class="trim-label bot-label">下端をドラッグ</div>
+        </div>
+      </div>
+      <canvas id="cnv0" class="hidden"></canvas>
+      <button class="btn" id="camStartBtn0" onclick="startCamera(0)">📷 カメラを起動</button>
+      <button class="btn primary" id="captureBtn0" onclick="capture(0)" style="display:none">📸 撮影してOCR実行</button>
+      <button class="btn danger" id="camStopBtn0" onclick="stopCamera(0)" style="display:none">✕ カメラを停止</button>
+    </div>
+    <div id="t0-file" style="display:none">
+      <div class="upload-area" id="uploadArea0">
+        <input type="file" accept="image/*" onchange="loadFile(0,this)">
+        <div id="uploadInner0"><div class="upload-icon">🖼</div><div class="upload-label">タップして画像を選択</div></div>
+      </div>
+      <!-- ファイル用トリミングスライダー -->
+      <div class="trim-slider-wrap" id="fileSlider0" style="display:none">
+        <div class="trim-slider-label">📐 OCR範囲を調整（製品番号の行に合わせてください）</div>
+        <div class="trim-slider-row">
+          <span>上端</span>
+          <input type="range" min="0" max="100" value="30" id="slTop0" oninput="updateFileTrim(0)">
+          <span id="slTopVal0">30%</span>
+        </div>
+        <div class="trim-slider-row">
+          <span>下端</span>
+          <input type="range" min="0" max="100" value="55" id="slBot0" oninput="updateFileTrim(0)">
+          <span id="slBotVal0">55%</span>
+        </div>
+        <canvas id="previewCnv0" style="width:100%;border-radius:8px;border:2px solid var(--accent);display:block;margin-top:6px;"></canvas>
+      </div>
+      <button class="btn primary" onclick="runOcr(0)">🔍 この範囲でOCR実行</button>
+    </div>
+    <div id="t0-manual" style="display:none">
+      <p class="hint">製品番号を直接入力（英数字）</p>
+      <input class="manual-input" type="text" id="manualInput0" placeholder="例: 23306M81501BC" oninput="onManual(0)" autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="loading-bar" id="loading0"><div class="loading-bar-inner"></div></div>
+    <div class="extracted">
+      <div class="extracted-label">抽出された製品番号</div>
+      <div class="extracted-num pending" id="exNum0">未読取</div>
+    </div>
+    <div class="log-area" id="log0"></div>
+  </div>
+
+  <!-- 出荷票 -->
+  <div class="card">
+    <div class="card-header">🚚 出荷票 <span class="badge">伝票②</span></div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(1,'camera')">📷 カメラ</button>
+      <button class="tab" onclick="switchTab(1,'file')">🖼 ファイル</button>
+      <button class="tab" onclick="switchTab(1,'manual')">✏️ 手入力</button>
+    </div>
+    <div id="t1-camera">
+      <div class="cam-area" id="camArea1">
+        <div class="cam-placeholder" id="camPh1"><div class="cam-icon">📷</div><p>カメラを起動してください</p></div>
+        <video id="vid1" autoplay playsinline muted style="display:none"></video>
+        <div class="trim-frame" id="trimFrame1" style="display:none; top:35%; height:20%;">
+          <div class="trim-handle top-handle" id="topHandle1"></div>
+          <div class="trim-handle bot-handle" id="botHandle1"></div>
+          <div class="trim-label top-label">上端をドラッグ</div>
+          <div class="trim-label bot-label">下端をドラッグ</div>
+        </div>
+      </div>
+      <canvas id="cnv1" class="hidden"></canvas>
+      <button class="btn" id="camStartBtn1" onclick="startCamera(1)">📷 カメラを起動</button>
+      <button class="btn primary" id="captureBtn1" onclick="capture(1)" style="display:none">📸 撮影してOCR実行</button>
+      <button class="btn danger" id="camStopBtn1" onclick="stopCamera(1)" style="display:none">✕ カメラを停止</button>
+    </div>
+    <div id="t1-file" style="display:none">
+      <div class="upload-area" id="uploadArea1">
+        <input type="file" accept="image/*" onchange="loadFile(1,this)">
+        <div id="uploadInner1"><div class="upload-icon">🖼</div><div class="upload-label">タップして画像を選択</div></div>
+      </div>
+      <div class="trim-slider-wrap" id="fileSlider1" style="display:none">
+        <div class="trim-slider-label">📐 OCR範囲を調整（製品番号の行に合わせてください）</div>
+        <div class="trim-slider-row">
+          <span>上端</span>
+          <input type="range" min="0" max="100" value="30" id="slTop1" oninput="updateFileTrim(1)">
+          <span id="slTopVal1">30%</span>
+        </div>
+        <div class="trim-slider-row">
+          <span>下端</span>
+          <input type="range" min="0" max="100" value="55" id="slBot1" oninput="updateFileTrim(1)">
+          <span id="slBotVal1">55%</span>
+        </div>
+        <canvas id="previewCnv1" style="width:100%;border-radius:8px;border:2px solid var(--accent);display:block;margin-top:6px;"></canvas>
+      </div>
+      <button class="btn primary" onclick="runOcr(1)">🔍 この範囲でOCR実行</button>
+    </div>
+    <div id="t1-manual" style="display:none">
+      <p class="hint">製品番号を直接入力（英数字）</p>
+      <input class="manual-input" type="text" id="manualInput1" placeholder="例: 23306M81501BC" oninput="onManual(1)" autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="loading-bar" id="loading1"><div class="loading-bar-inner"></div></div>
+    <div class="extracted">
+      <div class="extracted-label">抽出された製品番号</div>
+      <div class="extracted-num pending" id="exNum1">未読取</div>
+    </div>
+    <div class="log-area" id="log1"></div>
+  </div>
+
+  <button class="btn" onclick="resetAll()">🔄 リセット</button>
+
+  <p class="section-title">📖 使い方</p>
+  <div class="card">
+    <ol style="font-size:13px;color:var(--text-sub);padding-left:1.2rem;line-height:2.2;">
+      <li>【カメラ】緑のフレームを製品番号の行に合わせて撮影</li>
+      <li>【ファイル】画像選択後、スライダーで範囲を絞ってOCR</li>
+      <li>2枚読み取ると自動で照合結果が表示されます</li>
+    </ol>
+    <p class="hint">💡 範囲を製品番号1行だけに絞ると精度が上がります</p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js"></script>
+<script>
+const state = {
+  images: [null, null],
+  imgElements: [null, null],
+  numbers: [null, null],
+  streams: [null, null],
+  camOn: [false, false],
+  trimTop: [35, 35],   // カメラフレーム上端 %
+  trimBot: [55, 55],   // カメラフレーム下端 %
+};
+
+// ---- タブ切替 ----
+function switchTab(idx, mode) {
+  ['camera','file','manual'].forEach(m => {
+    const el = document.getElementById(`t${idx}-${m}`);
+    if(el) el.style.display = m===mode ? '' : 'none';
+  });
+  const cards = document.querySelectorAll('.card');
+  cards[idx+1].querySelectorAll('.tab').forEach((b,i) => {
+    b.classList.toggle('active', ['camera','file','manual'][i]===mode);
+  });
+  if(mode !== 'camera' && state.camOn[idx]) stopCamera(idx);
+}
+
+// ---- カメラ ----
+async function startCamera(idx) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} }
+    });
+    state.streams[idx] = stream;
+    state.camOn[idx] = true;
+    const vid = document.getElementById(`vid${idx}`);
+    vid.srcObject = stream;
+    vid.style.display = 'block';
+    document.getElementById(`camPh${idx}`).style.display = 'none';
+    document.getElementById(`trimFrame${idx}`).style.display = 'block';
+    document.getElementById(`camStartBtn${idx}`).style.display = 'none';
+    document.getElementById(`captureBtn${idx}`).style.display = 'flex';
+    document.getElementById(`camStopBtn${idx}`).style.display = 'flex';
+    initDrag(idx);
+  } catch(e) {
+    alert('カメラにアクセスできません。\nHTTPS環境（GitHub Pages等）が必要です。\n\nエラー: ' + e.message);
+  }
+}
+
+function stopCamera(idx) {
+  if(state.streams[idx]) { state.streams[idx].getTracks().forEach(t=>t.stop()); state.streams[idx]=null; }
+  state.camOn[idx] = false;
+  const vid = document.getElementById(`vid${idx}`);
+  vid.srcObject = null; vid.style.display = 'none';
+  document.getElementById(`camPh${idx}`).style.display = 'flex';
+  document.getElementById(`trimFrame${idx}`).style.display = 'none';
+  document.getElementById(`camStartBtn${idx}`).style.display = 'flex';
+  document.getElementById(`captureBtn${idx}`).style.display = 'none';
+  document.getElementById(`camStopBtn${idx}`).style.display = 'none';
+}
+
+// ドラッグでトリミングフレーム調整
+function initDrag(idx) {
+  const frame = document.getElementById(`trimFrame${idx}`);
+  const area = document.getElementById(`camArea${idx}`);
+  const topH = document.getElementById(`topHandle${idx}`);
+  const botH = document.getElementById(`botHandle${idx}`);
+
+  function getRelY(e) {
+    const rect = area.getBoundingClientRect();
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return Math.max(0, Math.min(100, (clientY - rect.top) / rect.height * 100));
+  }
+
+  function onTopMove(e) {
+    e.preventDefault();
+    const y = getRelY(e);
+    if(y < state.trimBot[idx] - 5) {
+      state.trimTop[idx] = y;
+      updateFrame(idx);
+    }
+  }
+  function onBotMove(e) {
+    e.preventDefault();
+    const y = getRelY(e);
+    if(y > state.trimTop[idx] + 5) {
+      state.trimBot[idx] = y;
+      updateFrame(idx);
+    }
+  }
+  function addDrag(handle, moveFn) {
+    handle.addEventListener('touchstart', e => { document.addEventListener('touchmove', moveFn, {passive:false}); document.addEventListener('touchend', () => document.removeEventListener('touchmove', moveFn), {once:true}); }, {passive:true});
+    handle.addEventListener('mousedown', () => { document.addEventListener('mousemove', moveFn); document.addEventListener('mouseup', () => document.removeEventListener('mousemove', moveFn), {once:true}); });
+  }
+  addDrag(topH, onTopMove);
+  addDrag(botH, onBotMove);
+  updateFrame(idx);
+}
+
+function updateFrame(idx) {
+  const frame = document.getElementById(`trimFrame${idx}`);
+  frame.style.top = state.trimTop[idx] + '%';
+  frame.style.height = (state.trimBot[idx] - state.trimTop[idx]) + '%';
+}
+
+// 撮影
+async function capture(idx) {
+  const vid = document.getElementById(`vid${idx}`);
+  const cnv = document.getElementById(`cnv${idx}`);
+  const vw = vid.videoWidth || 1280;
+  const vh = vid.videoHeight || 720;
+  // トリミング範囲（%→px）
+  const yTop = Math.floor(vh * state.trimTop[idx] / 100);
+  const yBot = Math.ceil(vh * state.trimBot[idx] / 100);
+  const cropH = yBot - yTop;
+  cnv.width = vw; cnv.height = cropH;
+  cnv.getContext('2d').drawImage(vid, 0, yTop, vw, cropH, 0, 0, vw, cropH);
+  const dataUrl = cnv.toDataURL('image/jpeg', 0.95);
+  state.images[idx] = dataUrl;
+  // プレビュー
+  document.getElementById(`camPh${idx}`).innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:8px;">`;
+  document.getElementById(`camPh${idx}`).style.display = 'flex';
+  stopCamera(idx);
+  await doOcr(idx, dataUrl);
+}
+
+// ---- ファイル読込 ----
+function loadFile(idx, input) {
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    state.images[idx] = e.target.result;
+    const img = new Image();
+    img.onload = () => {
+      state.imgElements[idx] = img;
+      document.getElementById(`uploadInner${idx}`).innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:contain;">`;
+      // スライダー表示
+      document.getElementById(`fileSlider${idx}`).style.display = 'block';
+      updateFileTrim(idx);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function updateFileTrim(idx) {
+  const img = state.imgElements[idx];
+  if(!img) return;
+  const topPct = parseInt(document.getElementById(`slTop${idx}`).value);
+  const botPct = parseInt(document.getElementById(`slBot${idx}`).value);
+  document.getElementById(`slTopVal${idx}`).textContent = topPct + '%';
+  document.getElementById(`slBotVal${idx}`).textContent = botPct + '%';
+
+  // プレビューキャンバスに切り取り範囲を描画
+  const pc = document.getElementById(`previewCnv${idx}`);
+  const yTop = Math.floor(img.naturalHeight * topPct / 100);
+  const yBot = Math.ceil(img.naturalHeight * Math.max(botPct, topPct+2) / 100);
+  const cropH = yBot - yTop;
+  pc.width = img.naturalWidth;
+  pc.height = cropH;
+  const ctx = pc.getContext('2d');
+  // コントラスト強調
+  ctx.filter = 'contrast(1.4) brightness(1.1) grayscale(1)';
+  ctx.drawImage(img, 0, yTop, img.naturalWidth, cropH, 0, 0, img.naturalWidth, cropH);
+}
+
+function runOcr(idx) {
+  if(!state.images[idx]) { alert('先に画像を選択してください'); return; }
+  const img = state.imgElements[idx];
+  if(img) {
+    // ファイルモード：スライダー範囲でトリミング
+    const topPct = parseInt(document.getElementById(`slTop${idx}`).value);
+    const botPct = parseInt(document.getElementById(`slBot${idx}`).value);
+    const cnv = document.createElement('canvas');
+    const yTop = Math.floor(img.naturalHeight * topPct / 100);
+    const yBot = Math.ceil(img.naturalHeight * Math.max(botPct, topPct+2) / 100);
+    cnv.width = img.naturalWidth;
+    cnv.height = yBot - yTop;
+    const ctx = cnv.getContext('2d');
+    ctx.filter = 'contrast(1.4) brightness(1.1) grayscale(1)';
+    ctx.drawImage(img, 0, yTop, img.naturalWidth, yBot-yTop, 0, 0, img.naturalWidth, yBot-yTop);
+    doOcr(idx, cnv.toDataURL('image/jpeg', 0.95));
+  } else {
+    doOcr(idx, state.images[idx]);
+  }
+}
+
+// ---- OCR ----
+async function doOcr(idx, dataUrl) {
+  setLoading(idx, true);
+  setNum(idx, null, '認識中...');
+  try {
+    const result = await Tesseract.recognize(dataUrl, 'eng', {
+      logger: () => {},
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    });
+    const raw = result.data.text;
+    showLog(idx, raw);
+    const num = extractProductNumber(raw);
+    state.numbers[idx] = num;
+    setNum(idx, num, num || '見つかりません（手入力をお試しください）');
+    updateBanner();
+  } catch(e) {
+    setNum(idx, null, 'エラー: ' + e.message);
+  } finally {
+    setLoading(idx, false);
+  }
+}
+
+function extractProductNumber(text) {
+  const upper = text.toUpperCase();
+  const lines = upper.split('\n').map(l => l.replace(/\s+/g, ''));
+
+  // ① 「製品番号」ラベルの直後を最優先で取得
+  const labelPatterns = [
+    /製品番号[：:\s]*([0-9][0-9A-Z]{5,17})/,
+    /製品番号[：:\s]*([A-Z]{1,2}[0-9][0-9A-Z]{5,17})/,
+  ];
+  for (const pat of labelPatterns) {
+    const m = upper.replace(/\s+/g, '').match(pat);
+    if (m) return cleanNum(m[1]);
+  }
+
+  // ② 数字始まりの英数字混在パターン（例: 23306M81501BC）
+  for (const line of lines) {
+    const m = line.match(/(\d{4,6}[A-Z]\d{4,6}[A-Z]{1,3})/);
+    if (m) return cleanNum(m[1]);
+  }
+
+  // ③ 全体から候補を探す（除外リスト付き）
+  const EXCLUDE = /^(G\d+|MA\d+|XF\d+)$/;
+  const candidates = upper.match(/[0-9A-Z]{8,18}/g) || [];
+  const valid = candidates.filter(v =>
+    /[A-Z]/.test(v) && /[0-9]/.test(v) && !EXCLUDE.test(v)
+  );
+
+  // 数字始まりを優先
+  const numFirst = valid.find(v => /^\d/.test(v));
+  if (numFirst) return cleanNum(numFirst);
+  if (valid.length) return cleanNum(valid[0]);
+  return null;
+}
+
+// 先頭・末尾の1〜2文字のアルファベットノイズを除去（数字始まりに正規化）
+function cleanNum(v) {
+  // 先頭に余分なアルファベット1〜3文字がついていて、その後数字が続く場合は除去
+  const trimmed = v.replace(/^[A-Z]{1,3}(?=\d{4,})/, '');
+  // 除去後も英字と数字が混在していれば採用
+  if (/[A-Z]/.test(trimmed) && /[0-9]/.test(trimmed)) return trimmed;
+  // 除去しすぎた場合は元の値を返す
+  return v;
+}
+
+// ---- 手入力 ----
+function onManual(idx) {
+  const val = document.getElementById(`manualInput${idx}`).value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  state.numbers[idx] = val || null;
+  setNum(idx, val||null, val||'未入力');
+  updateBanner();
+}
+
+// ---- UI ----
+function setLoading(idx, on) { document.getElementById(`loading${idx}`).classList.toggle('active', on); }
+function setNum(idx, val, display) {
+  const el = document.getElementById(`exNum${idx}`);
+  el.textContent = display || val || '未読取';
+  el.classList.toggle('pending', !val);
+}
+function showLog(idx, raw) {
+  const el = document.getElementById(`log${idx}`);
+  el.style.display = 'block';
+  el.textContent = raw;
+}
+function updateBanner() {
+  const n0 = state.numbers[0], n1 = state.numbers[1];
+  const banner = document.getElementById('banner');
+  const icon = document.getElementById('bannerIcon');
+  const status = document.getElementById('bannerStatus');
+  const detail = document.getElementById('bannerDetail');
+  if(!n0 || !n1) {
+    banner.className = 'result-banner';
+    icon.textContent = '📋';
+    status.className = 'result-status wait';
+    status.textContent = '2枚の伝票を読み取ってください';
+    detail.textContent = `現品票: ${n0||'未読取'} ／ 出荷票: ${n1||'未読取'}`;
+    return;
+  }
+  const ok = n0 === n1;
+  banner.className = `result-banner ${ok?'ok':'ng'}`;
+  icon.textContent = ok ? '✅' : '❌';
+  status.className = `result-status ${ok?'ok':'ng'}`;
+  status.textContent = ok ? '一致　製品番号が一致しました' : '不一致　製品番号が異なります';
+  detail.textContent = `${n0}  ←→  ${n1}`;
+}
+function resetAll() {
+  [0,1].forEach(idx => {
+    stopCamera(idx);
+    state.images[idx] = null; state.imgElements[idx] = null; state.numbers[idx] = null;
+    state.trimTop[idx] = 35; state.trimBot[idx] = 55;
+    setNum(idx, null, '未読取'); setLoading(idx, false);
+    document.getElementById(`log${idx}`).style.display = 'none';
+    document.getElementById(`log${idx}`).textContent = '';
+    document.getElementById(`uploadInner${idx}`).innerHTML = '<div class="upload-icon">🖼</div><div class="upload-label">タップして画像を選択</div>';
+    document.getElementById(`camPh${idx}`).innerHTML = '<div class="cam-icon">📷</div><p>カメラを起動してください</p>';
+    document.getElementById(`manualInput${idx}`).value = '';
+    document.getElementById(`fileSlider${idx}`).style.display = 'none';
+    switchTab(idx,'camera');
+  });
+  updateBanner();
+}
+</script>
+</body>
+</html>
